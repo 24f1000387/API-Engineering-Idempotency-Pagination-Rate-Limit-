@@ -24,6 +24,7 @@ async def rate_limit_and_cors_middleware(request: Request, call_next):
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "*"
         response.headers["Access-Control-Allow-Headers"] = "*"
+        # Browser ko batana ki preflight pass ho gaya hai
         return response
 
     # 2. Rate Limiting Logic
@@ -38,7 +39,7 @@ async def rate_limit_and_cors_middleware(request: Request, call_next):
             oldest_request = rate_limits[client_id][0]
             retry_after = int(RATE_LIMIT_WINDOW - (now - oldest_request)) + 1
             
-            # Return 429 Error with Retry-After Header and CORS
+            # Return 429 Error with EXPOSED Retry-After Header
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Too Many Requests"},
@@ -46,7 +47,8 @@ async def rate_limit_and_cors_middleware(request: Request, call_next):
                     "Retry-After": str(max(1, retry_after)),
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Methods": "*",
-                    "Access-Control-Allow-Headers": "*"
+                    "Access-Control-Allow-Headers": "*",
+                    "Access-Control-Expose-Headers": "Retry-After"  # <--- THE MAGIC FIX
                 }
             )
             
@@ -60,6 +62,7 @@ async def rate_limit_and_cors_middleware(request: Request, call_next):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "*"
+    response.headers["Access-Control-Expose-Headers"] = "Retry-After"
     return response
 
 # --- ENDPOINTS ---
@@ -86,11 +89,9 @@ async def create_order(
 
 @app.get("/orders")
 async def get_orders(limit: int = 10, cursor: str = None):
-    # Cursor Logic: Start ID decoding
     start_id = 1
     if cursor:
         try:
-            # We are passing the last item ID as string, so we start from cursor + 1
             start_id = int(cursor) + 1
         except ValueError:
             start_id = 1
@@ -105,7 +106,6 @@ async def get_orders(limit: int = 10, cursor: str = None):
         else:
             break
             
-    # If we haven't reached the end, set the next cursor
     if items:
         last_id = items[-1]["id"]
         if last_id < TOTAL_ORDERS:
